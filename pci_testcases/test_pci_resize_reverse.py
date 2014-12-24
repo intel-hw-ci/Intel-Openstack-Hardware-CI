@@ -1,4 +1,3 @@
-# Copyright 2012 OpenStack Foundation
 # All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -27,13 +26,13 @@ from tempest.pci import pci
 
 CONF = config.CONF
 
-class ServersWithSpecificFlavorTestJSON(base.BaseV2ComputeAdminTest):
+class PCIResizeReverseTestJSON(base.BaseV2ComputeAdminTest):
     run_ssh = CONF.compute.run_ssh
     disk_config = 'AUTO'
 
     @classmethod
     def setUpClass(cls):
-        super(ServersWithSpecificFlavorTestJSON, cls).setUpClass()
+        super(PCIResizeReverseTestJSON, cls).setUpClass()
         cls.meta = {'hello': 'world'}
         cls.accessIPv4 = '1.1.1.1'
         cls.accessIPv6 = '0000:0000:0000:0000:0000:babe:220.12.22.2'
@@ -105,10 +104,6 @@ class ServersWithSpecificFlavorTestJSON(base.BaseV2ComputeAdminTest):
 
             self.client.revert_resize(self.server_id)
             self.client.wait_for_server_status(self.server_id, 'ACTIVE')
-            #import pdb
-            #pdb.set_trace()
-            # Need to poll for the id change until lp#924371 is fixed
-            #resp, server = self.client.get_server(self.server_id)
 	    pci_recover_flag = linux_client.get_pci(pciid)
             self.assertTrue(pci_recover_flag is not None)
 	    pci_count = linux_client.get_pci_count(pciid)
@@ -116,5 +111,3 @@ class ServersWithSpecificFlavorTestJSON(base.BaseV2ComputeAdminTest):
             self.assertEqual('1',pci_count)
 
 
-class ServersWithSpecificFlavorTestXML(ServersWithSpecificFlavorTestJSON):
-    _interface = 'xml'

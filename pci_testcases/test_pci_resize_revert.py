@@ -1,4 +1,3 @@
-# Copyright 2012 OpenStack Foundation
 # All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -113,7 +112,3 @@ class ServersWithSpecificFlavorTestJSON(base.BaseV2ComputeAdminTest):
 	    pci_count = linux_client.get_pci_count(pciid)
             pci_count = pci_count.strip()
             self.assertEqual('1',pci_count)
-
-
-class ServersWithSpecificFlavorTestXML(ServersWithSpecificFlavorTestJSON):
-    _interface = 'xml'

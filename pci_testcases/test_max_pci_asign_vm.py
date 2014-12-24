@@ -1,4 +1,3 @@
-# Copyright 2012 OpenStack Foundation
 # All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -28,13 +27,13 @@ from tempest.pci import pci
 CONF = config.CONF
 
 
-class ServersWithSpecificFlavorTestJSON(base.BaseV2ComputeAdminTest):
+class MaxPCIAsignVMTestJSON(base.BaseV2ComputeAdminTest):
     run_ssh = CONF.compute.run_ssh
     disk_config = 'AUTO'
 
     @classmethod
     def setUpClass(cls):
-        super(ServersWithSpecificFlavorTestJSON, cls).setUpClass()
+        super(MaxPCIAsignVMTestJSON, cls).setUpClass()
         cls.meta = {'hello': 'world'}
         cls.accessIPv4 = '1.1.1.1'
         cls.accessIPv6 = '0000:0000:0000:0000:0000:babe:220.12.22.2'
@@ -59,8 +58,6 @@ class ServersWithSpecificFlavorTestJSON(base.BaseV2ComputeAdminTest):
     @test.attr(type='gate')
     def test_assign_max_pci_to_single_instance(self):
         pci.get_pci_config(self)
-        #import pdb
-        #pdb.set_trace()
         for info,count in zip(self.infoList,self.countList):
             count = int(count)
             info = info.split(':')
@@ -90,6 +87,3 @@ class ServersWithSpecificFlavorTestJSON(base.BaseV2ComputeAdminTest):
             pci_count = int(pci_count)
             self.assertEqual(count,pci_count)
 
-
-class ServersWithSpecificFlavorTestXML(ServersWithSpecificFlavorTestJSON):
-    _interface = 'xml'

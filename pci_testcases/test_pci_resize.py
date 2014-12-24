@@ -1,4 +1,3 @@
-# Copyright 2012 OpenStack Foundation
 # All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -27,13 +26,13 @@ from tempest.pci import pci
 
 CONF = config.CONF
 
-class ServersWithSpecificFlavorTestJSON(base.BaseV2ComputeAdminTest):
+class PCIResizeTestJSON(base.BaseV2ComputeAdminTest):
     run_ssh = CONF.compute.run_ssh
     disk_config = 'AUTO'
 
     @classmethod
     def setUpClass(cls):
-        super(ServersWithSpecificFlavorTestJSON, cls).setUpClass()
+        super(PCIResizeTestJSON, cls).setUpClass()
         cls.meta = {'hello': 'world'}
         cls.accessIPv4 = '1.1.1.1'
         cls.accessIPv6 = '0000:0000:0000:0000:0000:babe:220.12.22.2'
@@ -115,5 +114,3 @@ class ServersWithSpecificFlavorTestJSON(base.BaseV2ComputeAdminTest):
             self.assertEqual('2',pci_count)
 
 
-class ServersWithSpecificFlavorTestXML(ServersWithSpecificFlavorTestJSON):
-    _interface = 'xml'
