@@ -1,0 +1,81 @@
+From 1c8eb90fda38fb5d6c3b42bf09d5179142c6a8a6 Mon Sep 17 00:00:00 2001
+From: root <root@otc-cloud>
+Date: Fri, 26 Dec 2014 09:34:23 -0800
+Subject: [PATCH] Add Intel PCI functions
+
+---
+ tempest/pci/pci.py |   58 ++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 58 insertions(+)
+ create mode 100644 tempest/pci/__init__.py
+ create mode 100644 tempest/pci/pci.py
+
+diff --git a/tempest/pci/__init__.py b/tempest/pci/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/tempest/pci/pci.py b/tempest/pci/pci.py
+new file mode 100644
+index 0000000..10a9341
+--- /dev/null
++++ b/tempest/pci/pci.py
+@@ -0,0 +1,58 @@
++import os
++from tempest import config
++from tempest.common.utils import data_utils
++
++CONF = config.CONF
++
++def __init__(self):
++    self.get_pci_config(self)
++
++def get_pci_config(self):
++    self.nameList = []
++    self.countList = []
++    self.pci_idList = []
++    self.infoList = []
++    parameter = os.getenv('pci_info')
++    parameter = parameter.strip()
++    parameter = parameter.split(';')
++    for i in parameter:
++        if i is not "":
++            i = i.split(',')
++            name = i[0].split(':')
++            self.nameList.append(name[1])
++            count = i[3].split(':')
++            self.countList.append(count[1])
++            pciid = i[2].split(':')
++            self.pci_idList.append(pciid[1])
++            info = name[1] + ":" + pciid[1]
++            self.infoList.append(info)
++    self.infoList = tuple(self.infoList)
++    self.countList = tuple(self.countList)
++    return self.infoList,self.countList
++
++def create_flavor_with_extra_specs(self,name,count=1):
++    flavor_with_pci_name = data_utils.rand_name('pci_flavor')
++    flavor_with_pci_id = data_utils.rand_int_id(start=1000)
++    ram = 2048
++    vcpus = 1
++    disk = 20
++    pci_name = name
++    pci_name = "%s:%d"%(pci_name,count)
++    extra_specs = {"pci_passthrough:alias": pci_name}
++
++    # Create a flavor with extra specs
++    resp, flavor = (self.flavor_client.
++                    create_flavor(flavor_with_pci_name,
++                                  ram, vcpus, disk,
++                                  flavor_with_pci_id))
++    self.flavor_client.set_flavor_extra_spec(flavor['id'], extra_specs)
++    self.addCleanup(flavor_clean_up, self, flavor['id'])
++    self.assertEqual(200, resp.status)
++
++    return flavor['id']
++
++def flavor_clean_up(self, flavor_id):
++    resp, body = self.flavor_client.delete_flavor(flavor_id)
++    self.assertEqual(resp.status, 202)
++    self.flavor_client.wait_for_resource_deletion(flavor_id)
++
+-- 
+1.7.9.5
+
