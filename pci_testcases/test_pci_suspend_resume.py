@@ -1,3 +1,4 @@
+# Copyright 2012 OpenStack Foundation
 # All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -18,46 +19,41 @@ import netaddr
 import testtools
 
 from tempest.api.compute import base
-from tempest.common.utils import data_utils
+from tempest_lib.common.utils import data_utils
 from tempest.common.utils.linux import remote_client
 from tempest import config
 from tempest import test
 from tempest.pci import pci
+from tempest.common import waiters
+import serial
+import time
 
 CONF = config.CONF
 
-class PCISuspendResumeTestJSON(base.BaseV2ComputeAdminTest):
-    run_ssh = CONF.compute.run_ssh
+class ServersWithSpecificFlavorTestJSON(base.BaseV2ComputeAdminTest):
+    run_ssh = CONF.validation.run_validation
     disk_config = 'AUTO'
+    @classmethod
+    def setup_credentials(cls):
+        cls.prepare_instance_network()
+        super(ServersWithSpecificFlavorTestJSON, cls).setup_credentials()
 
     @classmethod
-    def setUpClass(cls):
-        super(PCISuspendResumeTestJSON, cls).setUpClass()
-        cls.meta = {'hello': 'world'}
-        cls.accessIPv4 = '1.1.1.1'
-        cls.accessIPv6 = '0000:0000:0000:0000:0000:babe:220.12.22.2'
-        cls.name = data_utils.rand_name('server')
-        file_contents = 'This is a test file.'
-        personality = [{'path': '/test.txt',
-                       'contents': base64.b64encode(file_contents)}]
-        cls.client = cls.servers_client
+    def setup_clients(cls):
+        super(ServersWithSpecificFlavorTestJSON, cls).setup_clients()
         cls.flavor_client = cls.os_adm.flavors_client
-        cli_resp = cls.create_test_server(name=cls.name,
-                                          meta=cls.meta,
-                                          accessIPv4=cls.accessIPv4,
-                                          accessIPv6=cls.accessIPv6,
-                                          personality=personality,
-                                          disk_config=cls.disk_config)
-        cls.resp, cls.server_initial = cli_resp
-        cls.password = cls.server_initial['adminPass']
-        cls.client.wait_for_server_status(cls.server_initial['id'], 'ACTIVE')
-        resp, cls.server = cls.client.get_server(cls.server_initial['id'])
+        cls.client = cls.servers_client
 
-    @testtools.skipIf(not run_ssh, 'Instance validation tests are disabled.')
+    @classmethod
+    def resource_setup(cls):
+        cls.set_validation_resources()
+
+        super(ServersWithSpecificFlavorTestJSON, cls).resource_setup()
+
+    #@testtools.skipIf(not run_ssh, 'Instance validation tests are disabled.')
     @test.attr(type='gate')
     def test_assign_pci_suspend_resume_instance(self):
-	#Get PCI related parameter and ready to test
-        pci.get_pci_config(self)
+	pci.get_pci_config(self)
         for info in self.infoList:
             info = info.split(':')
             name = info[0]
@@ -67,39 +63,72 @@ class PCISuspendResumeTestJSON(base.BaseV2ComputeAdminTest):
 
             admin_pass = self.image_ssh_password
 
-            resp, server_with_pci = (self.create_test_server(
+            p, _ = pci.gen_rc_local_file()
+            cont = pci.gen_rc_local_dict(pci.RC_LSPCI)
+            # fstab = pci.gen_etc_fstab()
+            print cont
+            personality = [
+                {'path': "/etc/rc.local",
+                 'contents': cont}]
+            #     {'path': "/etc/fstab",
+            #      'contents': fstab}]
+
+            user_data = pci.gen_user_data("\n".join(pci.SUSPEND_PAUSE_CONSOLE_DATA))
+
+            server_with_pci = (self.create_test_server(
                                       wait_until='ACTIVE',
+                                      user_data=user_data,
+                                      #personality=personality,
                                       adminPass=admin_pass,
                                       flavor=flavor_with_pci_id))
 
-            resp, address = self.client.list_addresses(server_with_pci['id'])
-
-            addresses = {'addresses':address}
+            addresses = self.client.show_server(server_with_pci['id'])['server']
 
             password = 'cubswin:)'
 	    self.server_id = server_with_pci['id']
-            linux_client = remote_client.RemoteClient(addresses,
-                                                  self.ssh_user, password)
-            pci_flag = linux_client.get_pci(pciid)
-            self.assertTrue(pci_flag is not None)
-	    pci_count = linux_client.get_pci_count(pciid)
-            pci_count = pci_count.strip()
-            self.assertEqual('1',pci_count)
+            print self.server_id
+            print "cubswin:)"
+            pci_info = pci.retry_get_pci_output(
+                self.client.get_console_output, self.server_id)
 
-	    resp, server = self.client.suspend_server(self.server_id)
-            self.assertEqual(202, resp.status)
-            self.client.wait_for_server_status(self.server_id, 'SUSPENDED')
-            resp, server = self.client.resume_server(self.server_id)
-            self.assertEqual(202, resp.status)
-            self.client.wait_for_server_status(self.server_id, 'ACTIVE')
-	
+            expect_pci = filter(lambda x: pciid in x, pci_info)
+            self.assertTrue(not not expect_pci)
 
-	    linux_client = remote_client.RemoteClient(addresses,
-                                                  self.ssh_user, password)
-            pci_recover_flag = linux_client.get_pci(pciid)
-            self.assertTrue(pci_recover_flag is not None)	
-            pci_count = linux_client.get_pci_count(pciid)
-            pci_count = pci_count.strip()
-            self.assertEqual('1',pci_count)
+            pci_count = len(expect_pci)
+            self.assertEqual(1, pci_count)
+            #import pdb;pdb.set_trace()
+            time.sleep(3)
+	    self.client.suspend_server(self.server_id)
+            waiters.wait_for_server_status(self.client, self.server_id, 'SUSPENDED')
+            self.client.resume_server(self.server_id)
+            waiters.wait_for_server_status(self.client, self.server_id, 'ACTIVE')
+            print self.server_id
+            print "cubswin:)"
+
+            cmd = ["sudo", "virsh", "dumpxml", server_with_pci["id"]]
+            xml = pci.shell_command(cmd)
+            serial_path = pci.get_serial_path(xml)
+            cmd = ["sudo", "chmod", "a+wr", serial_path]
+            pci.shell_command(cmd)
+            ser = serial.Serial(port=serial_path, baudrate=38400, timeout=1)
+            for x in range(10):
+                ser.write('0\n')
+                time.sleep(1)
+                str = ser.readall()
+                if str.count('2') > 0 :
+                    break
+            ser.close()
+
+            pci_info = pci.retry_get_pci_output(
+                self.client.get_console_output, self.server_id,
+                DELIMITER="SP LSPCI")
+
+            expect_pci = filter(lambda x: pciid in x, pci_info)
+            self.assertTrue(not not expect_pci)
+
+            pci_count = len(expect_pci)
+            self.assertEqual(1, pci_count)
 
 
+class ServersWithSpecificFlavorTestXML(ServersWithSpecificFlavorTestJSON):
+    _interface = 'xml'

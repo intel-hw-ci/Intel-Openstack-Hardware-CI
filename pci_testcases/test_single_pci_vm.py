@@ -1,3 +1,4 @@
+# Copyright 2012 OpenStack Foundation
 # All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -12,13 +13,16 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import time
 import base64
+import os
 
 import netaddr
 import testtools
 
 from tempest.api.compute import base
-from tempest.common.utils import data_utils
+from tempest.common import waiters
+from tempest_lib.common.utils import data_utils
 from tempest.common.utils.linux import remote_client
 from tempest import config
 from tempest import test
@@ -26,34 +30,27 @@ from tempest.pci import pci
 
 CONF = config.CONF
 
-class SinglePCIVMTestJSON(base.BaseV2ComputeAdminTest):
-    run_ssh = CONF.compute.run_ssh
+class ServersWithSpecificFlavorTestJSON(base.BaseV2ComputeAdminTest):
+    run_ssh = CONF.validation.run_validation
     disk_config = 'AUTO'
 
     @classmethod
-    def setUpClass(cls):
-        super(SinglePCIVMTestJSON, cls).setUpClass()
-        cls.meta = {'hello': 'world'}
-        cls.accessIPv4 = '1.1.1.1'
-        cls.accessIPv6 = '0000:0000:0000:0000:0000:babe:220.12.22.2'
-        cls.name = data_utils.rand_name('server')
-        file_contents = 'This is a test file.'
-        personality = [{'path': '/test.txt',
-                       'contents': base64.b64encode(file_contents)}]
-        cls.client = cls.servers_client
-        cls.flavor_client = cls.os_adm.flavors_client
-        cli_resp = cls.create_test_server(name=cls.name,
-                                          meta=cls.meta,
-                                          accessIPv4=cls.accessIPv4,
-                                          accessIPv6=cls.accessIPv6,
-                                          personality=personality,
-                                          disk_config=cls.disk_config)
-        cls.resp, cls.server_initial = cli_resp
-        cls.password = cls.server_initial['adminPass']
-        cls.client.wait_for_server_status(cls.server_initial['id'], 'ACTIVE')
-        resp, cls.server = cls.client.get_server(cls.server_initial['id'])
+    def setup_credentials(cls):
+        cls.prepare_instance_network()
+        super(ServersWithSpecificFlavorTestJSON, cls).setup_credentials()
 
-    @testtools.skipIf(not run_ssh, 'Instance validation tests are disabled.')
+    @classmethod
+    def setup_clients(cls):
+        super(ServersWithSpecificFlavorTestJSON, cls).setup_clients()
+        cls.flavor_client = cls.os_adm.flavors_client
+        cls.client = cls.servers_client
+
+    @classmethod
+    def resource_setup(cls):
+        cls.set_validation_resources()
+
+        super(ServersWithSpecificFlavorTestJSON, cls).resource_setup()
+
     @test.attr(type='gate')
     def test_assign_single_pci_to_instance(self):
         #Get PCI related parameter and ready
@@ -66,23 +63,42 @@ class SinglePCIVMTestJSON(base.BaseV2ComputeAdminTest):
             flavor_with_pci_id = pci.create_flavor_with_extra_specs(self,name)
             admin_pass = self.image_ssh_password
 
-            resp, server_with_pci = (self.create_test_server(
+            p, _ = pci.gen_rc_local_file()
+            cont = pci.gen_rc_local_dict()
+            fstab = pci.gen_etc_fstab()
+
+            cont = pci.gen_rc_local_dict(pci.RC_LSPCI)
+            # personality = []
+            personality = [
+                {'path': "/etc/rc.local",
+                 'contents': cont}]
+
+            user_data = pci.gen_user_data("\n".join(pci.CONSOLE_DATA))
+
+            server_with_pci = (self.create_test_server(
                                       wait_until='ACTIVE',
                                       adminPass=admin_pass,
+                                      user_data=user_data,
+                                      personality=personality,
                                       flavor=flavor_with_pci_id))
-
-            resp, address = self.client.list_addresses(server_with_pci['id'])
-
-            addresses = {'addresses':address}
-
+            #print self.client.get_server_metadata_item(server_with_pci['id'],"addresses")
+            addresses = self.client.show_server(server_with_pci['id'])['server']
             password = 'cubswin:)'
 
-            linux_client = remote_client.RemoteClient(addresses,
-                                                  self.ssh_user, password)
-            pci_flag = linux_client.get_pci(pciid)
-            self.assertTrue(pci_flag is not None)
+            print "cirros@" + addresses["addresses"]["private"][0]["addr"]
+            print password
+            pci_info = pci.retry_get_pci_output(
+                self.client.get_console_output, server_with_pci["id"])
 
-            pci_count = linux_client.get_pci_count(pciid)
-	    pci_count = pci_count.strip()
-	    self.assertEqual('1',pci_count)
+            # pci_info = pci.get_pci_info(disk)
+            # pci_flag = linux_client.get_pci(pciid)
+            expect_pci = filter(lambda x: pciid in x, pci_info)
 
+            # self.assertTrue(pci_flag is not None)
+            self.assertTrue(not not expect_pci)
+
+            # pci_count = linux_client.get_pci_count(pciid)
+            pci_count = len(expect_pci)
+
+	    # pci_count = pci_count.strip()
+	    self.assertEqual(1, pci_count)
