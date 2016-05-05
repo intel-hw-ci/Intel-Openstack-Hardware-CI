@@ -1,26 +1,171 @@
-From 1c8eb90fda38fb5d6c3b42bf09d5179142c6a8a6 Mon Sep 17 00:00:00 2001
-From: root <root@otc-cloud>
-Date: Fri, 26 Dec 2014 09:34:23 -0800
-Subject: [PATCH] Add Intel PCI functions
+From bd02ab22f2103809fb97ceb1c9b734d3a0fdb7f4 Mon Sep 17 00:00:00 2001
+From: Intel <intel.ci@intel.com>
+Date: Tue, 12 Apr 2016 01:24:35 -0400
+Subject: [PATCH] rebase test case to drop remote client- base patch
 
 ---
- tempest/pci/pci.py |   58 ++++++++++++++++++++++++++++++++++++++++++++++++++++
- 1 file changed, 58 insertions(+)
+ PCI_case_parallel_list                             |   2 +
+ PCI_case_serial_list                               |   1 +
+ .../compute/servers/pci_tempest_cases/__init__.py  |   0
+ .../pci_tempest_cases/test_single_pci_vm.py        | 100 +++++++
+ tempest/pci/__init__.py                            |   0
+ tempest/pci/pci.py                                 | 330 +++++++++++++++++++++
+ 6 files changed, 433 insertions(+)
+ create mode 100644 PCI_case_parallel_list
+ create mode 100644 PCI_case_serial_list
+ create mode 100644 tempest/api/compute/servers/pci_tempest_cases/__init__.py
+ create mode 100644 tempest/api/compute/servers/pci_tempest_cases/test_single_pci_vm.py
  create mode 100644 tempest/pci/__init__.py
  create mode 100644 tempest/pci/pci.py
 
+diff --git a/PCI_case_parallel_list b/PCI_case_parallel_list
+new file mode 100644
+index 0000000..4da4db3
+--- /dev/null
++++ b/PCI_case_parallel_list
+@@ -0,0 +1,2 @@
++tempest.api.compute.servers.pci_tempest_cases.test_single_pci_vm.ServersWithSpecificFlavorTestJSON.test_assign_single_pci_to_instance[gate]
++
+diff --git a/PCI_case_serial_list b/PCI_case_serial_list
+new file mode 100644
+index 0000000..07652ed
+--- /dev/null
++++ b/PCI_case_serial_list
+@@ -0,0 +1 @@
++tempest.api.compute.servers.pci_tempest_cases.test_multi_pci_vm.ServersWithSpecificFlavorTestJSON.test_assign_pci_to_multi_instance[gate]
+diff --git a/tempest/api/compute/servers/pci_tempest_cases/__init__.py b/tempest/api/compute/servers/pci_tempest_cases/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/tempest/api/compute/servers/pci_tempest_cases/test_single_pci_vm.py b/tempest/api/compute/servers/pci_tempest_cases/test_single_pci_vm.py
+new file mode 100644
+index 0000000..31d8e00
+--- /dev/null
++++ b/tempest/api/compute/servers/pci_tempest_cases/test_single_pci_vm.py
+@@ -0,0 +1,100 @@
++# Copyright 2012 OpenStack Foundation
++# All Rights Reserved.
++#
++#    Licensed under the Apache License, Version 2.0 (the "License"); you may
++#    not use this file except in compliance with the License. You may obtain
++#    a copy of the License at
++#
++#         http://www.apache.org/licenses/LICENSE-2.0
++#
++#    Unless required by applicable law or agreed to in writing, software
++#    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
++#    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
++#    License for the specific language governing permissions and limitations
++#    under the License.
++
++import time
++import base64
++import os
++
++import netaddr
++import testtools
++
++from tempest.api.compute import base
++from tempest.common import waiters
++from tempest_lib.common.utils import data_utils
++from tempest.common.utils.linux import remote_client
++from tempest import config
++from tempest import test
++from tempest.pci import pci
++
++CONF = config.CONF
++
++class ServersWithSpecificFlavorTestJSON(base.BaseV2ComputeAdminTest):
++    run_ssh = CONF.validation.run_validation
++    disk_config = 'AUTO'
++
++    @classmethod
++    def setup_credentials(cls):
++        cls.prepare_instance_network()
++        super(ServersWithSpecificFlavorTestJSON, cls).setup_credentials()
++
++    @classmethod
++    def setup_clients(cls):
++        super(ServersWithSpecificFlavorTestJSON, cls).setup_clients()
++        cls.flavor_client = cls.os_adm.flavors_client
++        cls.client = cls.servers_client
++
++    @classmethod
++    def resource_setup(cls):
++        cls.set_validation_resources()
++
++        super(ServersWithSpecificFlavorTestJSON, cls).resource_setup()
++
++    @test.attr(type='gate')
++    def test_assign_single_pci_to_instance(self):
++        #Get PCI related parameter and ready
++        pci.get_pci_config(self)
++        for info in self.infoList:
++            info = info.split(':')
++            name = info[0]
++            pciid = info[1]
++
++            flavor_with_pci_id = pci.create_flavor_with_extra_specs(self,name)
++            admin_pass = self.image_ssh_password
++
++            p, _ = pci.gen_rc_local_file()
++            cont = pci.gen_rc_local_dict()
++            fstab = pci.gen_etc_fstab()
++
++            personality = []
++
++            user_data = pci.gen_user_data("\n".join(pci.CONSOLE_DATA))
++
++            server_with_pci = (self.create_test_server(
++                                      wait_until='ACTIVE',
++                                      adminPass=admin_pass,
++                                      user_data=user_data,
++                                      personality=personality,
++                                      flavor=flavor_with_pci_id))
++            #print self.client.get_server_metadata_item(server_with_pci['id'],"addresses")
++            addresses = self.client.show_server(server_with_pci['id'])['server']
++            password = 'cubswin:)'
++
++            print "cirros@" + addresses["addresses"]["private"][0]["addr"]
++            print password
++            pci_info = pci.retry_get_pci_output(
++                self.client.get_console_output, server_with_pci["id"])
++
++            # pci_info = pci.get_pci_info(disk)
++            # pci_flag = linux_client.get_pci(pciid)
++            expect_pci = filter(lambda x: pciid in x, pci_info)
++
++            # self.assertTrue(pci_flag is not None)
++            self.assertTrue(not not expect_pci)
++
++            # pci_count = linux_client.get_pci_count(pciid)
++            pci_count = len(expect_pci)
++
++	    # pci_count = pci_count.strip()
++	    self.assertEqual(1, pci_count)
 diff --git a/tempest/pci/__init__.py b/tempest/pci/__init__.py
 new file mode 100644
 index 0000000..e69de29
 diff --git a/tempest/pci/pci.py b/tempest/pci/pci.py
 new file mode 100644
-index 0000000..10a9341
+index 0000000..1875556
 --- /dev/null
 +++ b/tempest/pci/pci.py
-@@ -0,0 +1,58 @@
+@@ -0,0 +1,330 @@
++import base64
++import guestfs
++from functools import partial
 +import os
++import six
++import stat
++import subprocess
++import tempfile
++import time
++import xml.etree.ElementTree as ET
++
++from oslo_utils import encodeutils
 +from tempest import config
-+from tempest.common.utils import data_utils
++from tempest_lib.common.utils import data_utils
++
 +
 +CONF = config.CONF
 +
@@ -55,27 +200,287 @@ index 0000000..10a9341
 +    flavor_with_pci_id = data_utils.rand_int_id(start=1000)
 +    ram = 2048
 +    vcpus = 1
-+    disk = 20
++    disk = 2
 +    pci_name = name
 +    pci_name = "%s:%d"%(pci_name,count)
-+    extra_specs = {"pci_passthrough:alias": pci_name}
++    specs = {"pci_passthrough:alias": pci_name}
 +
 +    # Create a flavor with extra specs
-+    resp, flavor = (self.flavor_client.
-+                    create_flavor(flavor_with_pci_name,
-+                                  ram, vcpus, disk,
-+                                  flavor_with_pci_id))
-+    self.flavor_client.set_flavor_extra_spec(flavor['id'], extra_specs)
-+    self.addCleanup(flavor_clean_up, self, flavor['id'])
-+    self.assertEqual(200, resp.status)
++    flavor = (self.flavor_client.
++              create_flavor(name=flavor_with_pci_name,
++                                ram=ram, vcpus=vcpus, disk=disk,
++                                id=flavor_with_pci_id))
++    self.flavor_client.set_flavor_extra_spec(flavor['flavor']['id'], **specs)
++    self.addCleanup(flavor_clean_up, self, flavor['flavor']['id'])
 +
-+    return flavor['id']
++    return flavor['flavor']['id']
 +
 +def flavor_clean_up(self, flavor_id):
-+    resp, body = self.flavor_client.delete_flavor(flavor_id)
-+    self.assertEqual(resp.status, 202)
++    body = self.flavor_client.delete_flavor(flavor_id)
++    self.assertEqual(body.response.status, 202)
 +    self.flavor_client.wait_for_resource_deletion(flavor_id)
 +
++
++def shell_command(cmd, log=False):
++    # cmd = ['sudo', 'ip', 'netns', 'exec', ns, 'ssh', "%s@%s" %(name, ip),
++    # "'%s;ifconfig eth1 %s/24'" % (name ip)]
++    p = subprocess.Popen(
++        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
++    out, err = p.communicate()
++    if log:
++        print out
++        print err
++        if len(err):
++            return False
++    return out
++
++
++VM_MOUNT_POINT = "/mnt"
++PCI_PATH = "/pci.info"
++RC_LOCAL = "/etc/rc.local"
++USER_DATA = ['#!/bin/sh -e',
++             '# mount -a',
++             'mount /dev/vdb %s' % VM_MOUNT_POINT,
++             'touch %s%s' % (VM_MOUNT_POINT, PCI_PATH),
++             'lspci > %s%s' % (VM_MOUNT_POINT, PCI_PATH),
++             '# umount /mnt/'
++             'exit 0']
++
++
++PCIINFO_DELIMITER = "*" * 40 + "%s" + "*" * 40
++PCIINFO_DELIMITER_BEGIN = PCIINFO_DELIMITER % "PCI INFO BEGIN"
++PCIINFO_DELIMITER_END = PCIINFO_DELIMITER % "PCI INFO END"
++
++CONSOLE_DATA = ['#!/bin/sh -e',
++                'sudo echo "%s"' % PCIINFO_DELIMITER_BEGIN,
++	        'sudo lspci',
++                'sudo echo "%s"'  % PCIINFO_DELIMITER_END,
++                'exit 0']
++
++
++def gen_rc_local_file(pci_path=PCI_PATH):
++    """please remove the file: os.remove(p)
++       print gen_rc_local()
++    """
++    l, p = tempfile.mkstemp("local", "rc")
++    f = open(p, 'w+b')
++    f.writelines(['#!/bin/sh -e\n',
++	          'mount -a\n',
++                  'touch %s%s\n' % (VM_MOUNT_POINT, pci_path),
++                  'lspci > %s%s\n' % (VM_MOUNT_POINT, pci_path),
++	          'umount /mnt/\n'
++                  'exit 0\n'])
++    os.chmod(p, stat.S_IRWXU + stat.S_IXGRP + stat.S_IXOTH)
++    f.close()
++    return p, pci_path
++
++
++def gen_rc_local_dict(pci_path=PCI_PATH):
++    """
++    usage: personality = {}
++           personality.append({
++               'path': filepath,
++               'contents': cont,
++           })
++
++    """
++    data = ['#!/bin/sh -e',
++	    'mount -a',
++            'touch %s%s' % (VM_MOUNT_POINT, pci_path),
++            'lspci > %s%s' % (VM_MOUNT_POINT, pci_path),
++            'cd ~',
++	    'umount /mnt/',
++            'exit 0']
++    data = "\n".join(data)
++    if six.PY3 and isinstance(data, str):
++        data = data.encode('utf-8')
++    cont = base64.b64encode(data).decode('utf-8')
++    return cont
++
++
++def gen_user_data(userdata=USER_DATA):
++    if hasattr(userdata, 'read'):
++        userdata = userdata.read()
++    # NOTE(melwitt): Text file data is converted to bytes prior to
++    # base64 encoding. The utf-8 encoding will fail for binary files.
++    if six.PY3:
++        try:
++            userdata = userdata.encode("utf-8")
++        except AttributeError:
++            # In python 3, 'bytes' object has no attribute 'encode'
++            pass
++    else:
++        try:
++            userdata = encodeutils.safe_encode(userdata)
++        except UnicodeDecodeError:
++            pass
++
++    userdata_b64 = base64.b64encode(userdata).decode('utf-8')
++    return userdata_b64
++
++
++def gen_etc_fstab():
++    """
++    usage: personality = {}
++           personality.append({
++               'path': filepath,
++               'contents': cont,
++           })
++
++    """
++    data = ["/dev/root  /         auto     rw,noauto                 0 1",
++            "proc       /proc     proc     defaults                  0 0",
++            "devpts     /dev/pts  devpts   defaults,gid=5,mode=620   0 0",
++            "tmpfs      /dev/shm  tmpfs    mode=0777                 0 0",
++            "sysfs      /sys      sysfs    defaults                  0 0",
++            "tmpfs      /run      tmpfs    rw,nosuid,relatime,size=200k,mode=755 0 0",
++            "/dev/vdb    /mnt/ auto    defaults                0 0"]
++
++    data = "\n".join(data)
++    if six.PY3 and isinstance(data, str):
++        data = data.encode('utf-8')
++    cont = base64.b64encode(data).decode('utf-8')
++    return cont
++
++def get_pci_info(disk, pci_path=PCI_PATH):
++    """please remove the dir: os.rmdir(p)
++    mount the disk by guestfs and get the pci info.
++    need:
++    $ sudo chmod g+rw /boot/vmlinuz-/boot/vmlinuz-`uname -r`
++    $ sudo usermod -a -G root jenkins
++    need to install these 2 packages
++    $ sudo apt-get install libguestfs-tools
++    $ sudo apt-get install python-guestfs
++    need to add use to kvm group
++    $ sudo usermod -a -G kvm jenkins
++    or
++    $ sudo chmod 0666 /dev/kvm
++    ref http://libguestfs.org/guestfs-python.3.html
++    for debug:
++    $ export LIBGUESTFS_DEBUG=1
++    $ export LIBGUESTFS_TRACE=1
++    ref http://libguestfs.org/guestfs-faq.1.html#debugging-libguestfs
++    """
++    p = tempfile.mkdtemp("guestfs", "mount")
++    g = guestfs.GuestFS(python_return_dict=True)
++    # g.add_drive_opts(disk, format="qcow2", readonly=1)
++    g.add_drive_opts(disk, readonly=1)
++    g.launch()
++    g.mount('/dev/sda', '/')
++    return g.read_lines(pci_path)
++
++
++def nbd_mount(f, disk, path=PCI_PATH):
++    """please remove the dir: os.rmdir(p)
++    mount the disk by guestfs and get the pci info.
++    need:
++    $ sudo rmmod nbd
++    $ sudo modprobe nbd max_part=16
++    ref https://en.wikibooks.org/wiki/QEMU/Images
++    ref https://blogs.gnome.org/muelli/2010/03/mounting-qemu-qcow2-image-using-nbd/
++    """
++    mount_point = "/mnt/nbd"
++    cmd = ["sudo", "modinfo", "nbd"]
++    out = shell_command(cmd)
++    if "modinfo: ERROR:" in out:
++        cmd = ["sudo", "modprobe", "nbd", "max_part=16"]
++        shell_command(cmd)
++
++    if not os.path.exists(mount_point):
++        cmd = ["sudo", "mkdir", mount_point]
++        shell_command(cmd)
++
++    if os.path.ismount(mount_point):
++        cmd = ["sudo", "umount", mount_point]
++        shell_command(cmd)
++
++    cmd = ["sudo", "qemu-nbd", "-d", "/dev/nbd0"]
++    shell_command(cmd)
++
++    cmd = ["sudo", "killall", "qemu-nbd"]
++    shell_command(cmd)
++
++    # cmd = ["sudo", "qemu-nbd", "-r", "-c", "/dev/nbd0", disk]
++    cmd = ["sudo", "qemu-nbd", "-c", "/dev/nbd0", disk]
++    shell_command(cmd)
++
++    cmd = ["sudo", "mount", "/dev/nbd0", mount_point]
++    shell_command(cmd)
++
++    if not os.path.ismount(mount_point):
++        cmd = ["sudo", "qemu-nbd", "-d", "/dev/nbd0"]
++        shell_command(cmd)
++        raise Exception("Can't mount the VM disk!")
++
++    out = f(mount_point, path)
++
++    cmd = ["sudo", "umount", mount_point]
++    shell_command(cmd)
++
++    cmd = ["sudo", "qemu-nbd", "-d", "/dev/nbd0"]
++    shell_command(cmd)
++    return out
++
++
++def cat_file(mount, pci_path):
++    cmd = ["sudo", "cat", mount + pci_path]
++    pci_info = shell_command(cmd, True)
++    if pci_info is False:
++        return pci_info
++    return pci_info.splitlines()
++
++
++get_pci_info_by_nbd = partial(nbd_mount, cat_file)
++
++
++def x_file(mount, rc_path):
++    cmd = ["sudo", "chmod", "a+x", mount + rc_path]
++    out = shell_command(cmd)
++    return out
++
++rc_local_add_x = partial(nbd_mount, x_file)
++
++
++def get_vda_path(xml):
++    # tree = ET.parse('/etc/libvirt/qemu/instance-0000001f.xml')
++    # root = tree.getroot()
++    root = ET.fromstring(xml)
++    disks = root.findall("./devices/disk[@device='disk'][@type='file']")
++    for d in disks:
++        t = d.find("target")
++        if t.attrib.get("dev") == "vda":
++            return d.find("./source").get("file")
++
++def get_config_drive_path(xml):
++    # tree = ET.parse('/etc/libvirt/qemu/instance-0000001f.xml')
++    # root = tree.getroot()
++    root = ET.fromstring(xml)
++    disks = root.findall("./devices/disk[@device='disk'][@type='file']")
++    for d in disks:
++        f = d.find("./source").get("file")
++        if "disk.config" in f:
++            return f
++
++
++def get_pci_output(get_console_output, server_id):
++    output = get_console_output(server_id)['output']
++    lines = output.split('\n')
++    if (len(lines) > 0 and lines.count(PCIINFO_DELIMITER_BEGIN) > 0
++        and lines.count(PCIINFO_DELIMITER_END)):
++        begin = lines.index(PCIINFO_DELIMITER_BEGIN) + 1
++        end = lines.index(PCIINFO_DELIMITER_END)
++        return lines[begin : end]
++
++
++def retry_get_pci_output(get_console_output, server_id, retry=20):
++    while retry > 0:
++        out = get_pci_output(get_console_output, server_id)
++        if out is None:
++            retry = retry - 1
++            time.sleep(1)
++        else:
++            return out
++    raise Exception("Can't get the pci.info from VM!")
 -- 
-1.7.9.5
+1.9.1
 
