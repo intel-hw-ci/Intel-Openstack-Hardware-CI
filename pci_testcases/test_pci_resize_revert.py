@@ -151,7 +151,7 @@ class ServersWithSpecificFlavorTestJSON(base.BaseV2ComputeAdminTest):
             self.assertTrue(not not expect_pci)
 
             pci_count = len(expect_pci)
-            self.assertEqual(2, pci_count)
+            self.assertEqual(1, pci_count)
 
 
 
